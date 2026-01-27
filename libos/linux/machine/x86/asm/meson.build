@@ -1,7 +1,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Copyright © 2022 Keith Packard
+# Copyright © 2026 Keith Packard
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -32,12 +32,12 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-inc_sys_headers_machine = [
-  'fcntl.h',
-  'linux-syscall.h',
+
+inc_linux_asm_headers_machine = [
+  'ldt.h'
 ]
 
 if really_install
-  install_headers(inc_sys_headers_machine,
-                  install_dir: include_dir / 'sys')
+  install_headers(inc_linux_asm_headers_machine,
+                  install_dir: include_dir / 'asm')
 endif

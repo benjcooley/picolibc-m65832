@@ -36,6 +36,7 @@
 has_arm_semihost = false
 has_semihost_test_flag = false
 has_semihost = true
+test_default_variant = 'semihost'
 
 src_semihost = []
 

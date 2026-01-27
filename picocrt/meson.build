@@ -47,6 +47,7 @@ picocrt_machines = [
   },
 ]
 
+crt0_linux = false
 machine_dir = 'machine' / host_cpu_family
 picocrt_march_add=''
 if fs.is_dir(machine_dir)
@@ -118,7 +119,7 @@ picocrt_variants = [
 
 # Use the semihost version of crt0 for testing as that
 # will have exception handling
-crt0_test = 'crt0_semihost'
+crt0_test = 'crt0_' + get_option('crt0-test')
 
 if thread_local_storage
   picocrt_variants += {
@@ -131,6 +132,15 @@ if thread_local_storage
     'name': 'inittls-semihost',
     'suffix': '-inittls-semihost',
     'c_args': ['-DINIT_TLS', '-DCRT0_EXIT', '-DCRT0_SEMIHOST'],
+    'src': src_picocrt,
+  }
+endif
+
+if crt0_linux
+  picocrt_variants += {
+    'name': 'linux',
+    'suffix': '-linux',
+    'c_args': ['-DINIT_TLS', '-DNO_FLASH', '-DCRT0_EXIT', '-DCRT0_LINUX'],
     'src': src_picocrt,
   }
 endif

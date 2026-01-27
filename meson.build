@@ -1716,8 +1716,8 @@ has_semihost = false
 # arm compatible semihosting, enough to run arm semihost tests
 has_arm_semihost = false
 
-crt0_test = 'crt0_hosted'
-oslib_test = 'lib_semihost'
+# linux support
+has_linux = false
 
 # some semihost needs bios to run the tests with qemu
 bios_bin = []
@@ -1726,6 +1726,8 @@ bios_bin = []
 if enable_semihost
   subdir('semihost')
 endif
+
+subdir('libos')
 
 conf_data.set('__SEMIHOST', has_semihost, description: 'Semihost APIs supported')
 conf_data.set('__ARM_SEMIHOST', has_arm_semihost, description: 'ARM Semihost APIs supported')
@@ -1751,10 +1753,45 @@ if get_option('test-long-double')
   native_c_args += ['-D_TEST_LONG_DOUBLE']
 endif
 
+linkerscript_test_variant = get_option('linkerscript-test')
+if linkerscript_test_variant != ''
+  linkerscript_test = 'picolibc_' + linkerscript_test_variant
+else
+  linkerscript_test = 'picolibc'
+endif
+
 test_env = environment()
 test_env.prepend('PATH', meson.current_source_dir() / 'scripts')
 
 if has_semihost
+  test_default_variant = 'semihost'
+else
+  test_default_variant = 'hosted'
+endif
+
+crt0_test_variant = get_option('crt0-test')
+if crt0_test_variant == ''
+  crt0_test_variant = test_default_variant
+endif
+
+oslib_test_variant = get_option('oslib-test')
+if oslib_test_variant == ''
+  oslib_test_variant = test_default_variant
+endif
+
+crt0_test = 'crt0_' + crt0_test_variant
+oslib_test = 'lib_' + oslib_test_variant
+
+set_test_link_defines = false
+if has_semihost and oslib_test_variant == 'semihost'
+  set_test_link_defines = true
+endif
+
+if has_linux and oslib_test_variant == 'linux'
+  set_test_link_defines = true
+endif
+
+if set_test_link_defines
   foreach params : [default_target] + targets
     
     target = params['name']
@@ -1781,7 +1818,7 @@ if has_semihost
       test_linker_files_variable = 'test_linker_files_' + target
       test_link_depends_variable = 'test_link_depends' + target
       test_link_depends_noflash_variable = 'test_link_depends_noflash' + target
-      picolibc_ld_value = get_variable('picolibc' + target + '_ld', picolibc_ld)
+      picolibc_ld_value = get_variable(linkerscript_test + target + '_ld', picolibc_ld)
 
       if thread_local_storage
         test_inittls_link_args_variable = 'test_inittls_link_args' + target
@@ -1842,7 +1879,7 @@ if has_semihost
                  ['-nostdlib', '-T', picolibc_noflash_ld_string])
     set_variable(test_link_depends_noflash_variable, [picolibc_noflash_ld_value])
   endforeach
-  test_noflash = true
+  test_noflash = linkerscript_test_variant != 'noflash'
 else
   test_link_args = test_link_args_base
   test_link_depends = []
