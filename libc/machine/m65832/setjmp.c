@@ -4,15 +4,7 @@
  *
  * setjmp/longjmp for M65832
  *
- * jmp_buf layout (32 bytes):
- *   0-3:   SP (stack pointer)
- *   4-7:   PC (return address) 
- *   8-11:  R16 (callee-saved)
- *  12-15:  R17 (callee-saved)
- *  16-19:  R18 (callee-saved)
- *  20-23:  R19 (callee-saved)
- *  24-27:  R20 (callee-saved)
- *  28-31:  R21 (callee-saved)
+ * TODO: Implement proper assembly version for actual register saving
  */
 
 #include <setjmp.h>

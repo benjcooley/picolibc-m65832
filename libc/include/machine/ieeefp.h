@@ -678,6 +678,11 @@ warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 #endif
 #endif
 
+/* M65832 - 32-bit little-endian processor */
+#ifdef __m65832__
+#define __IEEE_LITTLE_ENDIAN
+#endif
+
 #ifndef __IEEE_BIG_ENDIAN
 #ifndef __IEEE_LITTLE_ENDIAN
 #error Endianess not declared!!

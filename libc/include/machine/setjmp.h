@@ -464,6 +464,22 @@ _BEGIN_STD_C
 #endif
 #endif
 
+#ifdef __m65832__
+/*
+ * M65832 jmp_buf layout (32 bytes):
+ *   0-3:   SP (stack pointer)
+ *   4-7:   PC (return address)
+ *   8-11:  R16 (callee-saved)
+ *  12-15:  R17 (callee-saved)
+ *  16-19:  R18 (callee-saved)
+ *  20-23:  R19 (callee-saved)
+ *  24-27:  R20 (callee-saved)
+ *  28-31:  R21 (callee-saved)
+ */
+#define _JBLEN 8
+#define _JBTYPE unsigned int
+#endif
+
 #ifdef _JBLEN
 #ifdef _JBTYPE
 typedef _JBTYPE jmp_buf[_JBLEN];
