@@ -11,12 +11,13 @@ srcs_machine = [
 
 has_ieeefp_funcs = false
 
-foreach target : targets
-    value = get_variable('target_' + target)
-    set_variable('lib_machine' + target,
-        static_library('machine' + target,
-            srcs_machine,
-            pic: false,
-            include_directories: inc,
-            c_args: value[1] + c_args + arg_fnobuiltin))
+foreach params : targets
+  target = params['name']
+  target_c_args = params['c_args']
+  set_variable('lib_machine' + target,
+    static_library('machine' + target,
+      srcs_machine,
+      pic: false,
+      include_directories: inc,
+      c_args: target_c_args + c_args + arg_fnobuiltin))
 endforeach
