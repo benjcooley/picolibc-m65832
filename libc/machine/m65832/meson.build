@@ -7,6 +7,8 @@
 
 srcs_machine = [
     'setjmp.c',
+    'm65832_iob.c',
+    'syscalls.c',
 ]
 
 has_ieeefp_funcs = false
