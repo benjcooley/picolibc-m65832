@@ -35,7 +35,19 @@ int
 sprintf(char *s, const char *fmt, ...)
 {
     va_list           ap;
-    struct __file_str f = FDEV_SETUP_STRING_WRITE(s, NULL);
+    struct __file_str f;
+    f.file.unget = 0;
+    f.file.flags = __SWR;
+    f.file.put = __file_str_put;
+    f.file.get = NULL;
+    f.file.flush = NULL;
+#ifdef __STDIO_LOCKING
+    __flockfile_init(&f.file);
+#endif
+    f.pos = s;
+    f.end = NULL;
+    f.size = 0;
+    f.alloc = false;
     int               i;
 
     va_start(ap, fmt);

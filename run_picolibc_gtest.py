@@ -3,7 +3,7 @@
 Picolibc Test Suite Runner for M65832
 Outputs in Google Test (gtest) format
 
-Usage: ./run_picolibc_gtest.py [--filter=PATTERN] [--list] [--verbose]
+Usage: ./run_picolibc_gtest.py [--filter=PATTERN] [--list] [--verbose] [--no-rebuild]
 """
 
 import os
@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+from datetime import datetime
 
 # Paths
 PICOLIBC_ROOT = Path(__file__).resolve().parent
@@ -31,12 +32,17 @@ LLVM_BUILD = Path(
     )
 )
 CLANG = LLVM_BUILD / "clang"
-# LLD is only in the full build directory
-LLD = LLVM_BUILD_DEFAULT / "ld.lld"
+LLD = LLVM_BUILD / "ld.lld"
 EMU = PROJECTS_ROOT / "m65832" / "emu" / "m65832emu"
 SYSROOT = PROJECTS_ROOT / "m65832-sysroot"
+# Use picolibc build directory for libs/crt instead of sysroot (allows testing WIP builds)
+PICOLIBC_BUILD = Path(os.environ.get("PICOLIBC_BUILD", str(PROJECTS_ROOT / "picolibc-build-m65832")))
 PICOLIBC_TEST = PICOLIBC_ROOT / "test"
 CUSTOM_TESTS = PROJECTS_ROOT / "m65832" / "emu" / "c_tests" / "baremetal" / "picolibc"
+# Compiler-rt source directory
+COMPILER_RT_DIR = LLVM_ROOT / "m65832-stdlib" / "compiler-rt"
+# Test results directory for saving timestamped outputs
+TEST_RESULTS_DIR = PICOLIBC_ROOT / "test-results"
 
 # Colors (gtest style)
 GREEN = "\033[32m"
@@ -45,7 +51,127 @@ YELLOW = "\033[33m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-MAX_CYCLES = 1000000
+MAX_CYCLES = 10000000
+
+
+def rebuild_compiler_rt() -> bool:
+    """Rebuild compiler-rt library. Returns True on success."""
+    print(f"{BOLD}Rebuilding compiler-rt...{RESET}")
+    result = subprocess.run(
+        ["make", "clean"],
+        cwd=COMPILER_RT_DIR,
+        capture_output=True,
+        text=True
+    )
+    result = subprocess.run(
+        ["make", "-j8"],
+        cwd=COMPILER_RT_DIR,
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"{RED}Failed to build compiler-rt:{RESET}")
+        print(result.stderr)
+        return False
+    print(f"{GREEN}compiler-rt rebuilt successfully{RESET}")
+    return True
+
+
+def rebuild_picolibc() -> bool:
+    """Clean rebuild picolibc using meson. Returns True on success."""
+    import shutil
+    
+    print(f"{BOLD}Rebuilding picolibc (clean build)...{RESET}")
+    
+    # Cross-compilation file
+    cross_file = LLVM_ROOT / "m65832-stdlib" / "picolibc" / "cross-m65832.txt"
+    
+    # Remove old build directory for clean build
+    if PICOLIBC_BUILD.exists():
+        print(f"  Removing old build: {PICOLIBC_BUILD}")
+        shutil.rmtree(PICOLIBC_BUILD)
+    
+    # Reconfigure with meson
+    print(f"  Configuring with meson...")
+    result = subprocess.run(
+        [
+            "meson", "setup", str(PICOLIBC_BUILD), str(PICOLIBC_ROOT),
+            f"--cross-file={cross_file}",
+            "--buildtype=plain",
+            "-Ddebug=false",
+            "-Doptimization=1",
+            "-Dmultilib=false",
+            "-Dtests=false",
+            "-Dspecsdir=none",
+            "-Dfreestanding=true",
+            "-Dio-float-exact=false",  # Disable dtoa_ryu.c which causes regalloc crash
+        ],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"{RED}Failed to configure picolibc:{RESET}")
+        print(result.stderr)
+        return False
+    
+    # Build with ninja
+    print(f"  Building with ninja...")
+    result = subprocess.run(
+        ["ninja", "-C", str(PICOLIBC_BUILD), "-j8"],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"{RED}Failed to build picolibc:{RESET}")
+        print(result.stderr)
+        return False
+    
+    # Build M65832-specific crt0 and syscalls (not installed, just in build dir)
+    print(f"  Building M65832-specific files...")
+    m65832_files_dir = LLVM_ROOT / "m65832-stdlib" / "picolibc"
+    
+    # Compile crt0.s
+    result = subprocess.run(
+        [str(CLANG), "-target", "m65832-elf", "-ffreestanding",
+         "-c", str(m65832_files_dir / "crt0.s"),
+         "-o", str(PICOLIBC_BUILD / "crt0.o")],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"{RED}Failed to build crt0.o:{RESET}")
+        print(result.stderr)
+        return False
+    
+    # Compile syscalls.c (needs picolibc headers)
+    result = subprocess.run(
+        [str(CLANG), "-target", "m65832-elf", "-ffreestanding", "-O1",
+         f"-I{PICOLIBC_ROOT}/newlib/libc/include",
+         f"-I{PICOLIBC_ROOT}/libc/include",
+         f"-I{PICOLIBC_BUILD}",
+         "-c", str(m65832_files_dir / "syscalls.c"),
+         "-o", str(PICOLIBC_BUILD / "syscalls.o")],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"{RED}Failed to build syscalls.o:{RESET}")
+        print(result.stderr)
+        return False
+    
+    # Create libsys.a
+    result = subprocess.run(
+        ["ar", "rcs", str(PICOLIBC_BUILD / "libsys.a"), str(PICOLIBC_BUILD / "syscalls.o")],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        print(f"{RED}Failed to create libsys.a:{RESET}")
+        print(result.stderr)
+        return False
+    
+    print(f"{GREEN}picolibc rebuilt successfully{RESET}")
+    return True
 
 
 @dataclass
@@ -152,19 +278,68 @@ def find_test_files() -> List[Tuple[str, str, str]]:
     return tests
 
 
+# Global flag for using sysroot vs build directory
+USE_SYSROOT = False
+
+
+def _build_m65832_runtime(build_dir: Path, picolibc_dir: Path):
+    """Build M65832-specific runtime files (crt0.o, libsys.a) into build dir on demand."""
+    crt0_path = build_dir / "m65832-crt0.o"
+    libsys_path = build_dir / "libsys.a"
+
+    if not crt0_path.exists():
+        # Assemble our custom crt0 (uses single-underscore symbols matching linker script)
+        crt0_src = picolibc_dir / "crt0.s"
+        cmd = [str(CLANG), "-target", "m65832-elf", "-ffreestanding",
+               "-c", str(crt0_src), "-o", str(crt0_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"{RED}Failed to build crt0.o: {result.stderr}{RESET}")
+
+    if not libsys_path.exists():
+        # Compile syscalls.c
+        src = picolibc_dir / "syscalls.c"
+        syscalls_o = build_dir / "syscalls.o"
+        includes = [
+            f"-I{PICOLIBC_ROOT}/newlib/libc/include",
+            f"-I{PICOLIBC_ROOT}/libc/include",
+            f"-I{build_dir}",
+        ]
+        cmd = [str(CLANG), "-target", "m65832-elf", "-O1", "-ffreestanding",
+               *includes, "-c", str(src), "-o", str(syscalls_o)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"{RED}Failed to build syscalls.o: {result.stderr}{RESET}")
+            return
+        # Create static library so linker only pulls needed symbols
+        ar_cmd = ["ar", "rcs", str(libsys_path), str(syscalls_o)]
+        subprocess.run(ar_cmd, capture_output=True, text=True)
+
+
 def compile_test(src_path: str, work_dir: str) -> Tuple[bool, str, str]:
     """Compile a test file. Returns (success, obj_path, error_msg)."""
     base = Path(src_path).stem
     obj_path = os.path.join(work_dir, f"{base}.o")
 
+    if USE_SYSROOT:
+        # Use sysroot includes (original picolibc installation)
+        includes = [f"-I{SYSROOT}/include", f"-I{PICOLIBC_TEST}"]
+    else:
+        # Use picolibc source for includes (freshly built headers)
+        includes = [
+            f"-I{PICOLIBC_ROOT}/newlib/libc/include",
+            f"-I{PICOLIBC_ROOT}/libc/include",
+            f"-I{PICOLIBC_BUILD}",  # For generated headers like picolibc.h
+            f"-I{PICOLIBC_TEST}",
+        ]
+    
     cmd = [
         str(CLANG),
         "-target",
         "m65832-elf",
         "-O0",
         "-ffreestanding",
-        f"-I{SYSROOT}/include",
-        f"-I{PICOLIBC_TEST}",
+        *includes,
         "-c",
         src_path,
         "-o",
@@ -182,17 +357,40 @@ def link_test(obj_path: str, work_dir: str) -> Tuple[bool, str, str]:
     base = Path(obj_path).stem
     elf_path = os.path.join(work_dir, f"{base}.elf")
 
-    cmd = [
-        str(LLD),
-        f"-T{SYSROOT}/lib/m65832.ld",
-        f"{SYSROOT}/lib/crt0.o",
-        obj_path,
-        f"-L{SYSROOT}/lib",
-        "-lc",
-        "-lsys",
-        "-o",
-        elf_path,
-    ]
+    if USE_SYSROOT:
+        # Use sysroot libraries (original picolibc installation)
+        cmd = [
+            str(LLD),
+            f"-T{SYSROOT}/lib/m65832.ld",
+            f"{SYSROOT}/lib/crt0.o",
+            obj_path,
+            f"-L{SYSROOT}/lib",
+            "-lc",
+            "-lsys",
+            "-lcompiler_rt",
+            "-o",
+            elf_path,
+        ]
+    else:
+        # Use freshly built picolibc and compiler-rt from build directories
+        m65832_ld = LLVM_ROOT / "m65832-stdlib" / "picolibc" / "m65832.ld"
+        m65832_picolibc = LLVM_ROOT / "m65832-stdlib" / "picolibc"
+        # Build M65832-specific runtime (crt0, libsys) on demand
+        _build_m65832_runtime(PICOLIBC_BUILD, m65832_picolibc)
+        crt0_path = PICOLIBC_BUILD / "m65832-crt0.o"
+        cmd = [
+            str(LLD),
+            f"-T{m65832_ld}",
+            str(crt0_path),
+            obj_path,
+            f"-L{PICOLIBC_BUILD}",
+            f"-L{COMPILER_RT_DIR}",
+            "-lc",
+            "-lsys",
+            "-lcompiler_rt",
+            "-o",
+            elf_path,
+        ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -204,8 +402,12 @@ def run_test(elf_path: str) -> Tuple[bool, int, str]:
     """Run a test on the emulator. Returns (success, exit_code, output)."""
     cmd = [str(EMU), "-c", str(MAX_CYCLES), "--stop-on-brk", "-s", elf_path]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    output = result.stdout + result.stderr
+    result = subprocess.run(cmd, capture_output=True, timeout=30)
+    # Handle possible binary output from emulator
+    try:
+        output = result.stdout.decode('utf-8', errors='replace') + result.stderr.decode('utf-8', errors='replace')
+    except:
+        output = str(result.stdout) + str(result.stderr)
 
     # Extract A register value from the CPU state line
     # Look for "PC: xxxx  A: xxxx" pattern to avoid matching "A:32-bit"
@@ -410,19 +612,57 @@ def print_gtest_footer(results: List[TestResult], total_time: float):
         print(f" {failed} FAILED TEST{'S' if failed != 1 else ''}")
 
 
+def save_results(output: str, results: List[TestResult]) -> str:
+    """Save timestamped test results. Returns the output file path."""
+    TEST_RESULTS_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Save full output
+    output_file = TEST_RESULTS_DIR / f"results_{timestamp}.txt"
+    with open(output_file, "w") as f:
+        f.write(output)
+    
+    # Also save a summary for easy diffing
+    summary_file = TEST_RESULTS_DIR / f"summary_{timestamp}.txt"
+    with open(summary_file, "w") as f:
+        f.write(f"# Test Results {timestamp}\n")
+        f.write(f"# Passed: {sum(1 for r in results if r.passed)}\n")
+        f.write(f"# Failed: {sum(1 for r in results if not r.passed and not r.skipped)}\n")
+        f.write(f"# Skipped: {sum(1 for r in results if r.skipped)}\n\n")
+        for r in sorted(results, key=lambda x: (x.suite, x.name)):
+            status = "PASS" if r.passed else ("SKIP" if r.skipped else "FAIL")
+            f.write(f"{status} {r.suite}.{r.name}\n")
+    
+    # Create/update symlink to latest
+    latest_link = TEST_RESULTS_DIR / "latest.txt"
+    latest_summary = TEST_RESULTS_DIR / "latest_summary.txt"
+    if latest_link.is_symlink():
+        latest_link.unlink()
+    if latest_summary.is_symlink():
+        latest_summary.unlink()
+    latest_link.symlink_to(output_file.name)
+    latest_summary.symlink_to(summary_file.name)
+    
+    return str(output_file)
+
+
 def main():
+    global USE_SYSROOT
+    
     parser = argparse.ArgumentParser(
         description="Run picolibc tests on M65832",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s                          Run all tests
+  %(prog)s                          Run all tests (rebuild picolibc first)
+  %(prog)s --use-sysroot            Run tests using sysroot picolibc (no rebuild)
   %(prog)s malloc                   Run test named 'malloc'
   %(prog)s string memcpy            Run tests 'string' and 'memcpy'
   %(prog)s --suite=test_string      Run all tests in test_string suite
   %(prog)s --filter='mem*'          Run tests matching pattern 'mem*'
   %(prog)s --list                   List all available tests
   %(prog)s --list --suite=picolibc  List tests in picolibc suite
+  %(prog)s --no-rebuild             Skip rebuilding libraries (use existing build dir)
 """,
     )
     parser.add_argument("tests", nargs="*", help="Specific test names to run")
@@ -430,7 +670,12 @@ Examples:
     parser.add_argument("--suite", "-s", help="Run only tests from this suite")
     parser.add_argument("--list", "-l", action="store_true", help="List tests without running")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument("--no-rebuild", action="store_true", help="Skip rebuilding compiler-rt and picolibc")
+    parser.add_argument("--use-sysroot", action="store_true", help="Use sysroot picolibc instead of rebuilding")
     args = parser.parse_args()
+    
+    # Set global flag for sysroot mode
+    USE_SYSROOT = args.use_sysroot
 
     # Find all tests
     all_tests = find_test_files()
@@ -483,12 +728,29 @@ Examples:
             print()
         return 0
 
+    # Rebuild libraries unless --no-rebuild or --use-sysroot specified
+    if args.use_sysroot:
+        print(f"\n{BOLD}=== Using sysroot picolibc (no rebuild) ==={RESET}\n")
+    elif not args.no_rebuild:
+        print(f"\n{BOLD}=== Rebuilding libraries to match current compiler ==={RESET}\n")
+        if not rebuild_compiler_rt():
+            print(f"{RED}Aborting: compiler-rt build failed{RESET}")
+            return 1
+        if not rebuild_picolibc():
+            print(f"{RED}Aborting: picolibc build failed{RESET}")
+            return 1
+        print()
+
     # Group by suite
     suites = {}
     for suite, path, desc in all_tests:
         if suite not in suites:
             suites[suite] = []
         suites[suite].append((path, desc))
+
+    # Capture output for saving
+    import io
+    output_capture = io.StringIO()
 
     # Create temp directory
     with tempfile.TemporaryDirectory() as work_dir:
@@ -525,8 +787,30 @@ Examples:
         total_time = (time.time() - total_start) * 1000
         print_gtest_footer(results, total_time)
 
-        # Return exit code
+        # Save timestamped results
+        passed = sum(1 for r in results if r.passed)
         failed = sum(1 for r in results if not r.passed and not r.skipped)
+        skipped = sum(1 for r in results if r.skipped)
+        
+        summary_lines = [
+            f"Test run completed: {passed} passed, {failed} failed, {skipped} skipped",
+            f"Total time: {total_time:.0f}ms",
+        ]
+        for r in sorted(results, key=lambda x: (x.suite, x.name)):
+            status = "PASS" if r.passed else ("SKIP" if r.skipped else "FAIL")
+            summary_lines.append(f"{status} {r.suite}.{r.name}")
+        
+        output_file = save_results("\n".join(summary_lines), results)
+        print(f"\n{BOLD}Results saved to:{RESET} {output_file}")
+        
+        # Show how to diff with previous
+        prev_summary = TEST_RESULTS_DIR / "latest_summary.txt"
+        if prev_summary.exists():
+            summaries = sorted(TEST_RESULTS_DIR.glob("summary_*.txt"))
+            if len(summaries) > 1:
+                print(f"{BOLD}To diff with previous:{RESET} diff {summaries[-2]} {summaries[-1]}")
+
+        # Return exit code
         return 1 if failed > 0 else 0
 
 

@@ -102,7 +102,9 @@ tests_complex_other = [
 ]
 
 tests = tests_real_trig + tests_real_exp + tests_real_other
-tests += tests_complex_trig + tests_complex_exp + tests_complex_other
+if have_complex
+  tests += tests_complex_trig + tests_complex_exp + tests_complex_other
+endif
 
 functions = [ 'acos', 'acosh', 'asin', 'asinh', 'atan', 'atanh',
               'cbrt', 'cos', 'cosh', 'erf', 'erfc', 'exp', 'exp10', 'exp2',

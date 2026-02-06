@@ -43,5 +43,7 @@ core
 lost+found
 
 # ignore meson build directories
-
 build-*/
+
+# Test results (timestamped logs)
+test-results/

@@ -162,3 +162,104 @@ void __attribute__((noreturn)) _exit(int status) {
     __syscall1(M65832_SYS_EXIT, status);
     __builtin_unreachable();
 }
+
+/* Additional filesystem stubs for tests */
+
+int _unlink(const char *path) {
+    (void)path;
+    errno = ENOENT;
+    return -1;
+}
+
+__attribute__((weak)) int unlink(const char *path) {
+    return _unlink(path);
+}
+
+int _link(const char *oldpath, const char *newpath) {
+    (void)oldpath;
+    (void)newpath;
+    errno = EMLINK;
+    return -1;
+}
+
+__attribute__((weak)) int link(const char *oldpath, const char *newpath) {
+    return _link(oldpath, newpath);
+}
+
+int _stat(const char *path, struct stat *st) {
+    (void)path;
+    (void)st;
+    errno = ENOENT;
+    return -1;
+}
+
+__attribute__((weak)) int stat(const char *path, struct stat *st) {
+    return _stat(path, st);
+}
+
+int _rename(const char *oldpath, const char *newpath) {
+    (void)oldpath;
+    (void)newpath;
+    errno = ENOENT;
+    return -1;
+}
+
+__attribute__((weak)) int rename(const char *oldpath, const char *newpath) {
+    return _rename(oldpath, newpath);
+}
+
+int _mkdir(const char *path, mode_t mode) {
+    (void)path;
+    (void)mode;
+    errno = ENOENT;
+    return -1;
+}
+
+__attribute__((weak)) int mkdir(const char *path, mode_t mode) {
+    return _mkdir(path, mode);
+}
+
+int _rmdir(const char *path) {
+    (void)path;
+    errno = ENOENT;
+    return -1;
+}
+
+__attribute__((weak)) int rmdir(const char *path) {
+    return _rmdir(path);
+}
+
+int _access(const char *path, int mode) {
+    (void)path;
+    (void)mode;
+    errno = ENOENT;
+    return -1;
+}
+
+__attribute__((weak)) int access(const char *path, int mode) {
+    return _access(path, mode);
+}
+
+char *_getcwd(char *buf, size_t size) {
+    if (buf && size > 0) {
+        buf[0] = '/';
+        if (size > 1) buf[1] = '\0';
+        return buf;
+    }
+    errno = ERANGE;
+    return NULL;
+}
+
+__attribute__((weak)) char *getcwd(char *buf, size_t size) {
+    return _getcwd(buf, size);
+}
+
+int _chdir(const char *path) {
+    (void)path;
+    errno = ENOENT;
+    return -1;
+}
+
+__attribute__((weak)) int chdir(const char *path) {
+    return _chdir(path);
+}

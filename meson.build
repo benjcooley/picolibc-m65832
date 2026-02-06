@@ -481,8 +481,17 @@ else
 endif
 
 if sysroot_install
-  # Get 'sysroot' or 'GCC_EXEC_PREFIX' from GCC output
-  sysroot = run_command(cc.cmd_array() + ['-print-sysroot'], check : true).stdout().split('\n')[0]
+  # Get 'sysroot' from cross file property, or from compiler output
+  if meson.is_cross_build() and meson.get_cross_property('sys_root', '') != ''
+    sysroot = meson.get_cross_property('sys_root')
+  else
+    sysroot_result = run_command(cc.cmd_array() + ['-print-sysroot'], check : false)
+    if sysroot_result.returncode() == 0
+      sysroot = sysroot_result.stdout().split('\n')[0]
+    else
+      sysroot = ''
+    endif
+  endif
   if sysroot != ''
     specs_prefix_format_format = '%R/@0@'
     specs_prefix_format_default = '%R/@0@'
