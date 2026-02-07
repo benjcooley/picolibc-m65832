@@ -62,7 +62,7 @@ extern char _end[];
 extern char _heap_end[];
 static char *heap_ptr;
 
-void *_sbrk(ptrdiff_t incr) {
+__attribute__((weak)) void *_sbrk(ptrdiff_t incr) {
     char *prev_heap;
     if (!heap_ptr) {
         heap_ptr = _end;
@@ -76,11 +76,11 @@ void *_sbrk(ptrdiff_t incr) {
     return prev_heap;
 }
 
-ssize_t _write(int fd, const void *buf, size_t len) {
+__attribute__((weak)) ssize_t _write(int fd, const void *buf, size_t len) {
     return __syscall_ret(__syscall3(M65832_SYS_WRITE, fd, (long)buf, (long)len));
 }
 
-ssize_t _read(int fd, void *buf, size_t len) {
+__attribute__((weak)) ssize_t _read(int fd, void *buf, size_t len) {
     return __syscall_ret(__syscall3(M65832_SYS_READ, fd, (long)buf, (long)len));
 }
 
@@ -92,7 +92,7 @@ __attribute__((weak)) ssize_t read(int fd, void *buf, size_t len) {
     return _read(fd, buf, len);
 }
 
-int _open(const char *path, int flags, ...) {
+__attribute__((weak)) int _open(const char *path, int flags, ...) {
     mode_t mode = 0;
     if (flags & O_CREAT) {
         va_list ap;
@@ -114,7 +114,7 @@ __attribute__((weak)) int open(const char *path, int flags, ...) {
     return _open(path, flags, mode);
 }
 
-int _close(int fd) {
+__attribute__((weak)) int _close(int fd) {
     return (int)__syscall_ret(__syscall1(M65832_SYS_CLOSE, fd));
 }
 
@@ -122,7 +122,7 @@ __attribute__((weak)) int close(int fd) {
     return _close(fd);
 }
 
-off_t _lseek(int fd, off_t offset, int whence) {
+__attribute__((weak)) off_t _lseek(int fd, off_t offset, int whence) {
     return (off_t)__syscall_ret(__syscall3(M65832_SYS_LSEEK, fd, (long)offset, whence));
 }
 
@@ -130,7 +130,7 @@ __attribute__((weak)) off_t lseek(int fd, off_t offset, int whence) {
     return _lseek(fd, offset, whence);
 }
 
-int _fstat(int fd, struct stat *st) {
+__attribute__((weak)) int _fstat(int fd, struct stat *st) {
     return (int)__syscall_ret(__syscall2(M65832_SYS_FSTAT, fd, (long)st));
 }
 
@@ -138,7 +138,7 @@ __attribute__((weak)) int fstat(int fd, struct stat *st) {
     return _fstat(fd, st);
 }
 
-int _isatty(int fd) {
+__attribute__((weak)) int _isatty(int fd) {
     if (fd >= 0 && fd <= 2) {
         return 1;
     }
@@ -146,18 +146,18 @@ int _isatty(int fd) {
     return 0;
 }
 
-int _getpid(void) {
+__attribute__((weak)) int _getpid(void) {
     return (int)__syscall_ret(__syscall0(M65832_SYS_GETPID));
 }
 
-int _kill(pid_t pid, int sig) {
+__attribute__((weak)) int _kill(pid_t pid, int sig) {
     (void)pid;
     (void)sig;
     errno = EINVAL;
     return -1;
 }
 
-void __attribute__((noreturn)) _exit(int status) {
+__attribute__((weak, noreturn)) void _exit(int status) {
     __syscall1(M65832_SYS_EXIT_GRP, status);
     __syscall1(M65832_SYS_EXIT, status);
     __builtin_unreachable();
@@ -165,7 +165,7 @@ void __attribute__((noreturn)) _exit(int status) {
 
 /* Additional filesystem stubs for tests */
 
-int _unlink(const char *path) {
+__attribute__((weak)) int _unlink(const char *path) {
     (void)path;
     errno = ENOENT;
     return -1;
@@ -175,7 +175,7 @@ __attribute__((weak)) int unlink(const char *path) {
     return _unlink(path);
 }
 
-int _link(const char *oldpath, const char *newpath) {
+__attribute__((weak)) int _link(const char *oldpath, const char *newpath) {
     (void)oldpath;
     (void)newpath;
     errno = EMLINK;
@@ -186,7 +186,7 @@ __attribute__((weak)) int link(const char *oldpath, const char *newpath) {
     return _link(oldpath, newpath);
 }
 
-int _stat(const char *path, struct stat *st) {
+__attribute__((weak)) int _stat(const char *path, struct stat *st) {
     (void)path;
     (void)st;
     errno = ENOENT;
@@ -197,7 +197,7 @@ __attribute__((weak)) int stat(const char *path, struct stat *st) {
     return _stat(path, st);
 }
 
-int _rename(const char *oldpath, const char *newpath) {
+__attribute__((weak)) int _rename(const char *oldpath, const char *newpath) {
     (void)oldpath;
     (void)newpath;
     errno = ENOENT;
@@ -208,7 +208,7 @@ __attribute__((weak)) int rename(const char *oldpath, const char *newpath) {
     return _rename(oldpath, newpath);
 }
 
-int _mkdir(const char *path, mode_t mode) {
+__attribute__((weak)) int _mkdir(const char *path, mode_t mode) {
     (void)path;
     (void)mode;
     errno = ENOENT;
@@ -219,7 +219,7 @@ __attribute__((weak)) int mkdir(const char *path, mode_t mode) {
     return _mkdir(path, mode);
 }
 
-int _rmdir(const char *path) {
+__attribute__((weak)) int _rmdir(const char *path) {
     (void)path;
     errno = ENOENT;
     return -1;
@@ -229,7 +229,7 @@ __attribute__((weak)) int rmdir(const char *path) {
     return _rmdir(path);
 }
 
-int _access(const char *path, int mode) {
+__attribute__((weak)) int _access(const char *path, int mode) {
     (void)path;
     (void)mode;
     errno = ENOENT;
@@ -240,7 +240,7 @@ __attribute__((weak)) int access(const char *path, int mode) {
     return _access(path, mode);
 }
 
-char *_getcwd(char *buf, size_t size) {
+__attribute__((weak)) char *_getcwd(char *buf, size_t size) {
     if (buf && size > 0) {
         buf[0] = '/';
         if (size > 1) buf[1] = '\0';
@@ -254,7 +254,7 @@ __attribute__((weak)) char *getcwd(char *buf, size_t size) {
     return _getcwd(buf, size);
 }
 
-int _chdir(const char *path) {
+__attribute__((weak)) int _chdir(const char *path) {
     (void)path;
     errno = ENOENT;
     return -1;

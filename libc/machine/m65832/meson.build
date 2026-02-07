@@ -6,7 +6,7 @@
 # M65832 machine-specific sources
 
 srcs_machine = [
-    'setjmp.c',
+    'setjmp.S',
     'm65832_iob.c',
     'syscalls.c',
 ]

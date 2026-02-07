@@ -3,61 +3,50 @@
  *
  * Copyright © 2024 M65832 Project
  *
- * M65832 UART-based stdio implementation for picolibc
+ * M65832 stdio implementation for picolibc
+ *
+ * Uses _write() / _read() syscall stubs for I/O, which go through
+ * TRAP-based syscalls when running with the system emulator.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <sys/types.h>
 
-/* UART register addresses for DE25 platform */
-#define UART_BASE       0x10006000
-#define UART_STATUS     (*(volatile uint32_t *)(UART_BASE + 0x04))
-#define UART_TX_DATA    (*(volatile uint32_t *)(UART_BASE + 0x10))
-#define UART_RX_DATA    (*(volatile uint32_t *)(UART_BASE + 0x14))
-
-/* Status bits */
-#define UART_RX_AVAIL   0x01  /* Bit 0: RX data available */
-#define UART_TX_READY   0x02  /* Bit 1: TX ready */
+/* Declare syscall functions provided by libsys.a */
+extern ssize_t _write(int fd, const void *buf, size_t len);
+extern ssize_t _read(int fd, void *buf, size_t len);
 
 /*
- * Output a character to UART
+ * Output a character via _write(1, &c, 1) — stdout fd
  */
 static int
-uart_putc(char c, FILE *file)
+sys_putc(char c, FILE *file)
 {
     (void)file;
-    
-    /* Wait for TX ready */
-    while (!(UART_STATUS & UART_TX_READY))
-        ;
-    
-    /* Write character */
-    UART_TX_DATA = (uint32_t)(unsigned char)c;
-    
+    ssize_t r = _write(1, &c, 1);
+    if (r < 0) return EOF;
     return (unsigned char)c;
 }
 
 /*
- * Read a character from UART
+ * Read a character via _read(0, &c, 1) — stdin fd
  */
 static int
-uart_getc(FILE *file)
+sys_getc(FILE *file)
 {
     (void)file;
-    
-    /* Wait for RX available */
-    while (!(UART_STATUS & UART_RX_AVAIL))
-        ;
-    
-    /* Read and return character */
-    return (int)(UART_RX_DATA & 0xFF);
+    char c;
+    ssize_t r = _read(0, &c, 1);
+    if (r <= 0) return EOF;
+    return (unsigned char)c;
 }
 
-/* Create the stdio FILE structure */
-static FILE __stdio = FDEV_SETUP_STREAM(uart_putc, uart_getc, NULL, _FDEV_SETUP_RW);
+/* Create the stdio FILE structure using syscall-based I/O */
+static FILE __stdio = FDEV_SETUP_STREAM(sys_putc, sys_getc, NULL, _FDEV_SETUP_RW);
 
-/* Define stdin, stdout, stderr to all use the same UART stream */
+/* Define stdin, stdout, stderr to all use the same stream */
 #ifdef __strong_reference
 #define STDIO_ALIAS(x) __strong_reference(stdin, x);
 #else

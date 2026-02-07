@@ -10,6 +10,7 @@ import os
 import sys
 import subprocess
 import tempfile
+import shutil
 import time
 import argparse
 import re
@@ -51,7 +52,7 @@ YELLOW = "\033[33m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
 
-MAX_CYCLES = 10000000
+MAX_CYCLES = 500000000  # 500M - many picolibc tests have 100K+ iterations
 
 
 def rebuild_compiler_rt() -> bool:
@@ -385,8 +386,8 @@ def link_test(obj_path: str, work_dir: str) -> Tuple[bool, str, str]:
             obj_path,
             f"-L{PICOLIBC_BUILD}",
             f"-L{COMPILER_RT_DIR}",
-            "-lc",
-            "-lsys",
+            "-lsys",          # Our baremetal overrides first (e.g. _exit)
+            "-lc",            # Then picolibc
             "-lcompiler_rt",
             "-o",
             elf_path,
@@ -398,19 +399,52 @@ def link_test(obj_path: str, work_dir: str) -> Tuple[bool, str, str]:
     return True, elf_path, ""
 
 
-def run_test(elf_path: str) -> Tuple[bool, int, str]:
-    """Run a test on the emulator. Returns (success, exit_code, output)."""
-    cmd = [str(EMU), "-c", str(MAX_CYCLES), "--stop-on-brk", "-s", elf_path]
+# Global sandbox directory — created once, reused across tests
+_SANDBOX_DIR = None
 
-    result = subprocess.run(cmd, capture_output=True, timeout=30)
+def get_sandbox_dir() -> str:
+    """Get (or create) the shared sandbox directory for this test run."""
+    global _SANDBOX_DIR
+    if _SANDBOX_DIR is None:
+        _SANDBOX_DIR = tempfile.mkdtemp(prefix="m65832_sandbox_")
+    return _SANDBOX_DIR
+
+def cleanup_sandbox():
+    """Remove the sandbox directory at the end of the test run."""
+    global _SANDBOX_DIR
+    if _SANDBOX_DIR and os.path.isdir(_SANDBOX_DIR):
+        shutil.rmtree(_SANDBOX_DIR, ignore_errors=True)
+    _SANDBOX_DIR = None
+
+def run_test(elf_path: str) -> Tuple[bool, int, str]:
+    """Run a test on the emulator using system mode with sandbox for real I/O.
+    Returns (success, exit_code, output)."""
+    # Use system mode with sandbox so TRAP syscalls (I/O, exit) work properly.
+    # The sandbox provides a filesystem root and routes stdout/stderr to host.
+    sandbox_dir = get_sandbox_dir()
+    cmd = [
+        str(EMU),
+        "--system",
+        "--sandbox", sandbox_dir,
+        "-c", str(MAX_CYCLES),
+        "-s",
+        elf_path,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, timeout=60)
     # Handle possible binary output from emulator
     try:
         output = result.stdout.decode('utf-8', errors='replace') + result.stderr.decode('utf-8', errors='replace')
     except:
         output = str(result.stdout) + str(result.stderr)
 
-    # Extract A register value from the CPU state line
-    # Look for "PC: xxxx  A: xxxx" pattern to avoid matching "A:32-bit"
+    # In system mode, EXIT: field shows the exit code from SYS_EXIT syscall
+    match = re.search(r"EXIT:\s*([0-9A-Fa-f]+)", output)
+    if match:
+        exit_code = int(match.group(1), 16)
+        return True, exit_code, output
+
+    # Fallback: try parsing A register (legacy compatibility)
     match = re.search(r"PC:\s*[0-9A-Fa-f]+\s+A:\s*([0-9A-Fa-f]+)", output)
     if match:
         exit_code = int(match.group(1), 16)
@@ -437,6 +471,8 @@ def run_single_test(suite: str, src_path: str, work_dir: str) -> TestResult:
         "test-cplusplus": "Requires C++",
         "test-raise": "Requires signals",
         "test-except": "Requires exceptions",
+        # This test requires minimal crt0 that skips constructors
+        "constructor-skip": "Requires minimal crt0 (no constructors)",
     }
 
     if name in skip_tests:
@@ -500,6 +536,11 @@ def run_single_test(suite: str, src_path: str, work_dir: str) -> TestResult:
         success, exit_code, output = run_test(elf_path)
         elapsed = (time.time() - start_time) * 1000
 
+        # DEBUG: Show raw results for debugging
+        if os.environ.get("M65832_DEBUG"):
+            print(f"  DEBUG run_test: success={success} exit_code={exit_code} output_len={len(output)}")
+            print(f"  DEBUG output: {repr(output[:600])}")
+
         if not success:
             return TestResult(
                 name=name,
@@ -525,9 +566,18 @@ def run_single_test(suite: str, src_path: str, work_dir: str) -> TestResult:
                     error_msg=f"Expected {expected}, got {exit_code}",
                 )
         else:
-            # Standard: exit_code 0 = pass, non-zero = fail
+            # Standard: exit_code 0 = pass, 77 = skip (autotools convention), non-zero = fail
             if exit_code == 0:
                 return TestResult(name=name, suite=suite, passed=True, time_ms=elapsed)
+            elif exit_code == 77:
+                return TestResult(
+                    name=name,
+                    suite=suite,
+                    passed=False,
+                    time_ms=elapsed,
+                    skipped=True,
+                    skip_reason="Test skipped itself (exit 77)",
+                )
             else:
                 return TestResult(
                     name=name,
@@ -815,4 +865,7 @@ Examples:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        cleanup_sandbox()
